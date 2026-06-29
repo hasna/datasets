@@ -93,7 +93,13 @@ function readRows(path: string, kind: DatasetSourceKind): JsonObject[] {
   }
   if (kind === "json") {
     const parsed = JSON.parse(content);
-    const rows = Array.isArray(parsed) ? parsed : Array.isArray(parsed.rows) ? parsed.rows : [parsed];
+    const rows = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed.rows)
+        ? parsed.rows
+        : Array.isArray(parsed.records)
+          ? parsed.records
+          : [parsed];
     return rows.map(normalizeObject);
   }
   if (kind === "csv") return parseCsv(content);

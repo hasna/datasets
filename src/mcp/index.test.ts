@@ -104,6 +104,45 @@ describe("datasets MCP", () => {
       await close();
     }
   });
+
+  test("ingest accepts project-style JSON records wrappers over MCP", async () => {
+    process.env.OPEN_DATASETS_MCP_ALLOW_MUTATIONS = "1";
+    process.env.OPEN_DATASETS_MCP_ALLOW_IMPORTS = "1";
+    const jsonPath = join(testDir!, "records-wrapper.json");
+    writeFileSync(jsonPath, JSON.stringify({
+      schema_version: "hasna.project.dataset.v1",
+      dataset: { slug: "records-wrapper" },
+      records: [
+        { id: "BANK-MIRABAUD", status: "candidate" },
+        { id: "BANK-IBS", status: "needs-verification" },
+      ],
+    }));
+    const { client, close } = await connectedClient();
+    try {
+      const result = await client.callTool({
+        name: "datasets_ingest",
+        arguments: {
+          source: jsonPath,
+          name: "Records Wrapper",
+          project: "swiss-bank-account",
+          classification: "private",
+        },
+      });
+      expect(result.isError).not.toBe(true);
+      const payload = JSON.parse((result.content as Array<{ text: string }>)[0]!.text);
+      expect(payload.dataset).toMatchObject({
+        slug: "records-wrapper",
+        projectId: "swiss-bank-account",
+        rowCount: 2,
+      });
+      expect(Object.keys(payload.dataset.schema.properties ?? {})).toEqual([
+        "id",
+        "status",
+      ]);
+    } finally {
+      await close();
+    }
+  });
 });
 
 async function connectedClient(): Promise<{ client: Client; close: () => Promise<void> }> {

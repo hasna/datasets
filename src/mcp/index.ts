@@ -240,7 +240,13 @@ function readRows(path: string, kind: DatasetSourceKind): JsonObject[] {
   }
   if (kind === "json") {
     const parsed = JSON.parse(content);
-    const rows = Array.isArray(parsed) ? parsed : Array.isArray((parsed as { rows?: unknown }).rows) ? (parsed as { rows: unknown[] }).rows : [parsed];
+    const rows = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray((parsed as { rows?: unknown }).rows)
+        ? (parsed as { rows: unknown[] }).rows
+        : Array.isArray((parsed as { records?: unknown }).records)
+          ? (parsed as { records: unknown[] }).records
+          : [parsed];
     return rows.map(normalizeObject);
   }
   if (kind === "csv") return parseCsv(content);

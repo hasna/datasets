@@ -78,6 +78,35 @@ describe("datasets CLI", () => {
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("Invalid enum value");
   });
+
+  test("ingests project-style JSON records wrappers", async () => {
+    const fixtureDir = join(testDir!, "fixtures");
+    mkdirSync(fixtureDir, { recursive: true });
+    const jsonPath = join(fixtureDir, "records-wrapper.json");
+    writeFileSync(jsonPath, JSON.stringify({
+      schema_version: "hasna.project.dataset.v1",
+      dataset: { slug: "records-wrapper" },
+      records: [
+        { id: "BANK-MIRABAUD", status: "candidate" },
+        { id: "BANK-IBS", status: "needs-verification" },
+      ],
+    }));
+
+    const result = await runJson([
+      "ingest",
+      jsonPath,
+      "--name",
+      "Records Wrapper",
+      "--project",
+      "swiss-bank-account",
+      "--classification",
+      "private",
+      "--json",
+    ]);
+
+    expect(result.dataset.rowCount).toBe(2);
+    expect(Object.keys(result.dataset.schema.properties ?? {})).toEqual(["id", "status"]);
+  });
 });
 
 async function runJson(args: string[]): Promise<any> {
