@@ -1,0 +1,83 @@
+{
+  "name": "@hasna/datasets",
+  "version": "0.1.0",
+  "description": "Local dataset registry, previews, render adapters, and project dashboard provider for Hasna agents.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hasna/datasets.git"
+  },
+  "homepage": "https://github.com/hasna/datasets",
+  "bugs": {
+    "url": "https://github.com/hasna/datasets/issues"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
+  "bin": {
+    "datasets": "dist/cli/index.js",
+    "datasets-mcp": "dist/mcp/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./storage": {
+      "types": "./dist/storage.d.ts",
+      "import": "./dist/storage.js"
+    },
+    "./schemas": {
+      "types": "./dist/schemas.d.ts",
+      "import": "./dist/schemas.js"
+    },
+    "./render": {
+      "types": "./dist/render.d.ts",
+      "import": "./dist/render.js"
+    },
+    "./project-panel": {
+      "types": "./dist/project-panel.d.ts",
+      "import": "./dist/project-panel.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && bun build src/cli/index.ts --outdir dist/cli --target bun && bun build src/mcp/index.ts --outdir dist/mcp --target bun --external @modelcontextprotocol/sdk && bun build src/index.ts src/storage.ts src/schemas.ts src/render.ts src/project-panel.ts --outdir dist --target bun && tsc -p tsconfig.build.json --emitDeclarationOnly --outDir dist",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "smoke:dist": "bun -e \"import('./dist/index.js').then((m)=>{ if (!m.createDatasetsClient) process.exit(1) })\"",
+    "pack:check": "bun pm pack --dry-run --ignore-scripts",
+    "verify:release": "bun run typecheck && bun test && bun run build && bun run smoke:dist && bun run pack:check",
+    "dev:cli": "bun run src/cli/index.ts",
+    "dev:mcp": "bun run src/mcp/index.ts",
+    "prepack": "bun run verify:release",
+    "prepublishOnly": "bun run verify:release",
+    "postinstall": "mkdir -p $HOME/.hasna/datasets 2>/dev/null || true"
+  },
+  "keywords": [
+    "datasets",
+    "project-dashboard",
+    "json-render",
+    "hasna"
+  ],
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "dependencies": {
+    "@hasna/contracts": "^0.2.2",
+    "@json-render/core": "0.19.0",
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "commander": "^13.1.0",
+    "nanoid": "^5.0.9",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.4",
+    "typescript": "^5.7.3"
+  }
+}
