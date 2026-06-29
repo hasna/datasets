@@ -1,6 +1,6 @@
 {
   "name": "@hasna/datasets",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Local dataset registry, previews, render adapters, and project dashboard provider for Hasna agents.",
   "type": "module",
   "license": "Apache-2.0",
