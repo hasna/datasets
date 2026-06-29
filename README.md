@@ -28,6 +28,11 @@ datasets project-panel --project swiss-bank-account --json --contract
 datasets render-canvas --project swiss-bank-account --json
 ```
 
+Private and sensitive datasets are redacted in preview and render output by
+default. Use `--unredacted` only for local trusted inspection, with
+`OPEN_DATASETS_ALLOW_SENSITIVE_READS=1` set explicitly. MCP unredacted reads
+require `OPEN_DATASETS_MCP_ALLOW_SENSITIVE_READS=1`.
+
 ## Environment
 
 - `HASNA_DATASETS_HOME`: defaults to `~/.hasna/datasets`

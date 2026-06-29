@@ -1,6 +1,6 @@
 {
   "name": "@hasna/datasets",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local dataset registry, previews, render adapters, and project dashboard provider for Hasna agents.",
   "type": "module",
   "license": "Apache-2.0",
@@ -55,6 +55,7 @@
     "verify:release": "bun run typecheck && bun test && bun run build && bun run smoke:dist && bun run pack:check",
     "dev:cli": "bun run src/cli/index.ts",
     "dev:mcp": "bun run src/mcp/index.ts",
+    "prepare": "bun run build",
     "prepack": "bun run verify:release",
     "prepublishOnly": "bun run verify:release",
     "postinstall": "mkdir -p $HOME/.hasna/datasets 2>/dev/null || true"

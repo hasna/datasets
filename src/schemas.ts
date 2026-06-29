@@ -106,6 +106,7 @@ export const DatasetQuerySchema = z.object({
   sort: z.array(z.object({ column: z.string(), direction: z.enum(["asc", "desc"]).default("asc") })).optional(),
   limit: z.number().int().positive().max(500).default(20),
   offset: z.number().int().nonnegative().default(0),
+  redact: z.boolean().default(true),
 });
 export type DatasetQuery = z.infer<typeof DatasetQuerySchema>;
 

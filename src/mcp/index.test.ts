@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DATASETS_DB_PATH_ENV, DATASETS_HOME_ENV, ingestDataset } from "../storage.js";
@@ -53,7 +53,23 @@ describe("datasets MCP", () => {
       });
       expect(result.isError).not.toBe(true);
       const preview = JSON.parse((result.content as Array<{ text: string }>)[0]!.text);
-      expect(preview.rows[0]).toMatchObject({ bank: "Mirabaud" });
+      expect(preview.rows[0]).toMatchObject({ bank: "[redacted]" });
+    } finally {
+      await close();
+    }
+  });
+
+  test("schema inference refuses raw local paths by default", async () => {
+    const csvPath = join(testDir!, "raw.csv");
+    writeFileSync(csvPath, "name\nsecret\n");
+    const { client, close } = await connectedClient();
+    try {
+      const result = await client.callTool({
+        name: "datasets_schema_infer",
+        arguments: { ref: csvPath },
+      });
+      expect(result.isError).toBe(true);
+      expect((result.content as Array<{ text: string }>)[0]?.text).toContain("Registered source or dataset not found");
     } finally {
       await close();
     }

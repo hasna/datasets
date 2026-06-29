@@ -38,7 +38,7 @@ describe("datasets CLI", () => {
     const source = await runJson(["sources", "add", csvPath, "--name", "Swiss bank CSV", "--project", "swiss-bank-account", "--json"]);
     expect(source.kind).toBe("csv");
 
-    const result = await runJson(["ingest", source.id, "--name", "Bank shortlist", "--project", "swiss-bank-account", "--json"]);
+    const result = await runJson(["ingest", source.id, "--name", "Bank shortlist", "--project", "swiss-bank-account", "--classification", "public", "--json"]);
     expect(result.dataset.rowCount).toBe(2);
 
     const preview = await runJson(["preview", "bank-shortlist", "--project", "swiss-bank-account", "--limit", "2", "--json"]);
@@ -48,6 +48,35 @@ describe("datasets CLI", () => {
     const panel = await runJson(["project-panel", "--project", "swiss-bank-account", "--contract"]);
     expect(panel.provider.sourcePackage).toBe("@hasna/datasets");
     expect(panel.metrics.find((metric: { id: string }) => metric.id === "datasets")?.value).toBe(1);
+
+    const render = await runJson(["render", "bank-shortlist", "--project", "swiss-bank-account"]);
+    expect(render.elements.root.type).toBe("Table");
+  });
+
+  test("rejects invalid classification values", async () => {
+    const fixtureDir = join(testDir!, "fixtures");
+    mkdirSync(fixtureDir, { recursive: true });
+    const jsonPath = join(fixtureDir, "rows.json");
+    writeFileSync(jsonPath, JSON.stringify([{ id: "row-1" }]));
+
+    const proc = Bun.spawn({
+      cmd: ["bun", "run", cliEntry, "ingest", jsonPath, "--name", "Bad", "--classification", "banana", "--json"],
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        [DATASETS_HOME_ENV]: process.env[DATASETS_HOME_ENV]!,
+        [DATASETS_DB_PATH_ENV]: process.env[DATASETS_DB_PATH_ENV]!,
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stderr, exitCode] = await Promise.all([
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain("Invalid enum value");
   });
 });
 

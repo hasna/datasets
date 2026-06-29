@@ -8,7 +8,9 @@ import {
   type CreateProjectionInput,
   type CreateSourceInput,
   type Dataset,
+  DatasetClassificationSchema,
   type DatasetProjection,
+  DatasetProjectionKindSchema,
   type DatasetQuery,
   DatasetQuerySchema,
   type DatasetQueryResult,
@@ -22,6 +24,7 @@ import {
 export const DATASETS_HOME_ENV = "HASNA_DATASETS_HOME";
 export const DATASETS_DB_PATH_ENV = "HASNA_DATASETS_DB_PATH";
 export const DATASETS_SCHEMA_VERSION = 1 as const;
+export const DATASETS_MAX_SCAN_ROWS = 5_000 as const;
 
 const nanoid = customAlphabet(`0123456789${"abcdefghijklmnopqrstuvwxyz"}`, 12);
 
@@ -259,37 +262,40 @@ export function getSource(ref: string, db?: Database): DatasetSource | null {
 export function ingestDataset(input: IngestDatasetInput, db?: Database): { dataset: Dataset; version: DatasetVersion } {
   const opened = openDb(db);
   try {
-    const ts = now();
-    const rows = input.rows.map(normalizeRow);
-    const schema = input.schema ?? inferJsonSchema(rows);
-    const checksum = checksumJson(rows);
-    const byteSize = Buffer.byteLength(JSON.stringify(rows));
-    const slug = uniqueDatasetSlug(input.projectId ?? null, input.name, opened.db);
-    const id = `dset_${nanoid()}`;
-    opened.db.run(
-      `INSERT INTO datasets (
-        id, slug, name, project_id, source_id, status, classification, schema_json, ui_schema_json,
-        row_count, byte_size, checksum, metadata_json, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        slug,
-        input.name,
-        input.projectId ?? null,
-        input.sourceId ?? null,
-        input.classification ?? "private",
-        json(schema),
-        json(input.uiSchema ?? {}),
-        rows.length,
-        byteSize,
-        checksum,
-        json(input.metadata ?? {}),
-        ts,
-        ts,
-      ],
-    );
-    const version = createVersion(id, 1, rows, schema, checksum, input.sourceRevision ?? null, opened.db);
-    return { dataset: getDataset(id, undefined, opened.db)!, version };
+    return opened.db.transaction(() => {
+      const ts = now();
+      const rows = input.rows.map(normalizeRow);
+      const schema = input.schema ?? inferJsonSchema(rows);
+      const checksum = checksumJson(rows);
+      const byteSize = Buffer.byteLength(JSON.stringify(rows));
+      const slug = uniqueDatasetSlug(input.projectId ?? null, input.name, opened.db);
+      const id = `dset_${nanoid()}`;
+      const classification = DatasetClassificationSchema.parse(input.classification ?? "private");
+      opened.db.run(
+        `INSERT INTO datasets (
+          id, slug, name, project_id, source_id, status, classification, schema_json, ui_schema_json,
+          row_count, byte_size, checksum, metadata_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          slug,
+          input.name,
+          input.projectId ?? null,
+          input.sourceId ?? null,
+          classification,
+          json(schema),
+          json(input.uiSchema ?? {}),
+          rows.length,
+          byteSize,
+          checksum,
+          json(input.metadata ?? {}),
+          ts,
+          ts,
+        ],
+      );
+      const version = createVersion(id, 1, rows, schema, checksum, input.sourceRevision ?? null, opened.db);
+      return { dataset: getDataset(id, undefined, opened.db)!, version };
+    })();
   } finally {
     closeIfOwned(opened);
   }
@@ -338,22 +344,30 @@ export function previewDataset(ref: string, query: Partial<DatasetQuery> = {}, p
     if (!dataset) throw new Error(`Dataset not found: ${ref}`);
     const version = getLatestVersion(dataset.id, opened.db);
     const parsed = DatasetQuerySchema.parse(query);
-    const allRows = opened.db
-      .query<RecordRow, [string]>("SELECT * FROM dataset_records WHERE dataset_id = ? ORDER BY ordinal ASC")
-      .all(dataset.id)
+    const needsScan = Object.keys(parsed.filters ?? {}).length > 0 || (parsed.sort ?? []).length > 0;
+    const scanLimit = needsScan ? Math.min(DATASETS_MAX_SCAN_ROWS, dataset.rowCount) : parsed.limit;
+    const scanOffset = needsScan ? 0 : parsed.offset;
+    const records = opened.db
+      .query<RecordRow, [string, number, number]>("SELECT * FROM dataset_records WHERE dataset_id = ? ORDER BY ordinal ASC LIMIT ? OFFSET ?")
+      .all(dataset.id, scanLimit, scanOffset)
       .map(rowToRecord);
-    const filtered = applyFilters(allRows.map((row) => row.data), parsed.filters ?? {});
+    const filtered = applyFilters(records.map((row) => row.data), parsed.filters ?? {});
     const sorted = applySort(filtered, parsed.sort ?? []);
-    const sliced = sorted.slice(parsed.offset, parsed.offset + parsed.limit);
-    const columns = parsed.columns?.length ? parsed.columns : inferColumns(sorted);
-    const rows = sliced.map((row) => selectColumns(row, columns));
+    const sliced = needsScan ? sorted.slice(parsed.offset, parsed.offset + parsed.limit) : sorted;
+    const columns = parsed.columns?.length ? parsed.columns : inferColumnsFromSchema(dataset.schema, sorted);
+    const selectedRows = sliced.map((row) => selectColumns(row, columns));
+    const redacted = shouldRedactDataset(dataset, parsed.redact);
+    const rows = redacted ? selectedRows.map((row) => redactRow(row, columns)) : selectedRows;
+    const total = needsScan ? filtered.length : dataset.rowCount;
     return {
       dataset,
       version,
       columns,
       rows,
-      total: filtered.length,
-      truncated: parsed.offset + parsed.limit < filtered.length,
+      total,
+      truncated: needsScan
+        ? dataset.rowCount > DATASETS_MAX_SCAN_ROWS || parsed.offset + parsed.limit < filtered.length
+        : parsed.offset + parsed.limit < dataset.rowCount,
     };
   } finally {
     closeIfOwned(opened);
@@ -376,7 +390,7 @@ export function createDatasetProjection(input: CreateProjectionInput, db?: Datab
         dataset.id,
         slug,
         input.name,
-        input.kind,
+        DatasetProjectionKindSchema.parse(input.kind),
         json(input.query ?? {}),
         input.renderSpec ? json(input.renderSpec) : null,
         json(input.metadata ?? {}),
@@ -464,12 +478,10 @@ function createVersion(datasetId: string, version: number, rows: JsonObject[], s
     [id, datasetId, version, sourceRevision, rows.length, checksum, json(schema), json(sample), json({ sampleSize: sample.length }), ts],
   );
   const insert = db.query("INSERT INTO dataset_records (dataset_id, version_id, key, ordinal, data_json, hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)");
-  db.transaction(() => {
-    rows.forEach((row, index) => {
-      const rowHash = checksumJson(row);
-      insert.run(datasetId, id, rowKey(row, index), index, json(row), rowHash, ts);
-    });
-  })();
+  rows.forEach((row, index) => {
+    const rowHash = checksumJson(row);
+    insert.run(datasetId, id, rowKey(row, index), index, json(row), rowHash, ts);
+  });
   return getLatestVersion(datasetId, db)!;
 }
 
@@ -528,6 +540,7 @@ function rowToSource(row: SourceRow): DatasetSource {
 }
 
 function rowToDataset(row: DatasetRow): Dataset {
+  const classification = DatasetClassificationSchema.safeParse(row.classification);
   return {
     id: row.id,
     slug: row.slug,
@@ -535,7 +548,7 @@ function rowToDataset(row: DatasetRow): Dataset {
     projectId: row.project_id,
     sourceId: row.source_id,
     status: row.status as Dataset["status"],
-    classification: row.classification as Dataset["classification"],
+    classification: classification.success ? classification.data : "private",
     schema: parseJson(row.schema_json, {}),
     uiSchema: parseJson(row.ui_schema_json, {}),
     rowCount: row.row_count,
@@ -652,6 +665,22 @@ function selectColumns(row: JsonObject, columns: string[]): JsonObject {
 
 function inferColumns(rows: JsonObject[]): string[] {
   return [...new Set(rows.flatMap((row) => Object.keys(row)))].slice(0, 50);
+}
+
+function inferColumnsFromSchema(schema: JsonObject, rows: JsonObject[]): string[] {
+  const properties = schema.properties;
+  if (properties && typeof properties === "object" && !Array.isArray(properties)) {
+    return Object.keys(properties).slice(0, 50);
+  }
+  return inferColumns(rows);
+}
+
+function shouldRedactDataset(dataset: Dataset, redact: boolean): boolean {
+  return redact && (dataset.classification === "private" || dataset.classification === "sensitive");
+}
+
+function redactRow(row: JsonObject, columns: string[]): JsonObject {
+  return Object.fromEntries(columns.map((column) => [column, row[column] == null ? null : "[redacted]"]));
 }
 
 function countTable(db: Database, table: string): number {

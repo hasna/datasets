@@ -2,7 +2,15 @@
 import { readFileSync, statSync } from "node:fs";
 import { extname, resolve } from "node:path";
 import { Command } from "commander";
-import { DatasetSourceKindSchema, type DatasetSourceKind, type JsonObject } from "../schemas.js";
+import {
+  DatasetClassificationSchema,
+  DatasetProjectionKindSchema,
+  DatasetSourceKindSchema,
+  type DatasetClassification,
+  type DatasetProjectionKind,
+  type DatasetSourceKind,
+  type JsonObject,
+} from "../schemas.js";
 import { createDatasetsProjectPanel } from "../project-panel.js";
 import { buildDatasetCanvasSpec, buildDatasetRenderSpec } from "../render.js";
 import {
@@ -45,6 +53,28 @@ function parseLimit(value: string | undefined, fallback = 20): number {
 
 function parseKind(value: string): DatasetSourceKind {
   return DatasetSourceKindSchema.parse(value);
+}
+
+function parseClassification(value: string | undefined): DatasetClassification {
+  return DatasetClassificationSchema.parse(value ?? "private");
+}
+
+function parseProjectionKind(value: string): DatasetProjectionKind {
+  return DatasetProjectionKindSchema.parse(value);
+}
+
+function parseRenderer(value: string | undefined): "json-render" | "react-flow" {
+  if (!value) return "json-render";
+  if (value === "json-render" || value === "react-flow") return value;
+  throw new Error(`Unsupported renderer: ${value}`);
+}
+
+function requireUnredactedAllowed(unredacted: boolean | undefined): void {
+  if (!unredacted) return;
+  const value = process.env.OPEN_DATASETS_ALLOW_SENSITIVE_READS ?? process.env.OPEN_DATASETS_ALLOW_ALL;
+  if (value !== "1" && value !== "true" && value !== "yes" && value !== "on") {
+    throw new Error("Unredacted previews require OPEN_DATASETS_ALLOW_SENSITIVE_READS=1.");
+  }
 }
 
 function detectKind(path: string): DatasetSourceKind {
@@ -123,7 +153,7 @@ function sanitizeCsvCell(value: string): string {
 
 export function createProgram(): Command {
   const program = new Command();
-  program.name("datasets").description("Local datasets for Hasna project dashboards").version("0.1.0");
+  program.name("datasets").description("Local datasets for Hasna project dashboards").version("0.1.1");
 
   program
     .command("init")
@@ -176,6 +206,7 @@ export function createProgram(): Command {
       const path = source?.path ?? (statExists(resolve(sourceRef)) ? resolve(sourceRef) : null);
       if (!path) throw new Error(`Source path not found: ${sourceRef}`);
       const kind = source?.kind ?? detectKind(path);
+      const classification = parseClassification(options.classification);
       const rows = readRows(path, kind);
       const result = ingestDataset({
         name: options.name,
@@ -183,7 +214,7 @@ export function createProgram(): Command {
         sourceId: source?.id ?? null,
         rows,
         schema: options.schema ? JSON.parse(readFileSync(options.schema, "utf-8")) : undefined,
-        classification: options.classification as never,
+        classification,
         metadata: { sourcePath: path, sourceKind: kind },
       });
       printMaybeJson(result, options.json);
@@ -219,11 +250,14 @@ export function createProgram(): Command {
     .option("--project <slug>", "Project slug")
     .option("--limit <n>", "Rows to return", "20")
     .option("--columns <columns>", "Comma-separated columns")
+    .option("--unredacted", "Return raw private/sensitive row values; requires OPEN_DATASETS_ALLOW_SENSITIVE_READS=1", false)
     .option("--json", "Print JSON", false)
-    .action((datasetRef: string, options: { project?: string; limit?: string; columns?: string; json?: boolean }) => {
+    .action((datasetRef: string, options: { project?: string; limit?: string; columns?: string; unredacted?: boolean; json?: boolean }) => {
+      requireUnredactedAllowed(options.unredacted);
       const result = previewDataset(datasetRef, {
         limit: parseLimit(options.limit),
         columns: options.columns?.split(",").map((item) => item.trim()).filter(Boolean),
+        redact: !options.unredacted,
       }, options.project ? slugify(options.project) : undefined);
       printMaybeJson(result, options.json);
     });
@@ -256,7 +290,7 @@ export function createProgram(): Command {
       const projection = createDatasetProjection({
         dataset: datasetRef,
         name: options.name,
-        kind: options.kind as never,
+        kind: parseProjectionKind(options.kind),
         query: options.queryJson ? JSON.parse(options.queryJson) : {},
         renderSpec: options.specJson ? JSON.parse(options.specJson) : null,
       });
@@ -277,10 +311,16 @@ export function createProgram(): Command {
     .option("--project <slug>", "Project slug")
     .option("--limit <n>", "Preview rows", "20")
     .option("--renderer <name>", "json-render|react-flow", "json-render")
+    .option("--unredacted", "Return raw private/sensitive row values in JSON Render table specs; requires OPEN_DATASETS_ALLOW_SENSITIVE_READS=1", false)
     .option("--json", "Print JSON", false)
-    .action((datasetRef: string, options: { project?: string; limit?: string; renderer?: string; json?: boolean }) => {
-      const spec = buildDatasetRenderSpec({ dataset: datasetRef, projectId: options.project ? slugify(options.project) : null, limit: parseLimit(options.limit) });
-      printMaybeJson(spec, options.json ?? true);
+    .action((datasetRef: string, options: { project?: string; limit?: string; renderer?: string; unredacted?: boolean; json?: boolean }) => {
+      requireUnredactedAllowed(options.unredacted);
+      const renderer = parseRenderer(options.renderer);
+      const limit = parseLimit(options.limit);
+      const spec = renderer === "react-flow"
+        ? buildDatasetCanvasSpec({ projectId: options.project ? slugify(options.project) : "project", dataset: datasetRef, limit })
+        : buildDatasetRenderSpec({ dataset: datasetRef, projectId: options.project ? slugify(options.project) : null, limit, redact: !options.unredacted });
+      printJson(spec);
     });
 
   program
@@ -291,7 +331,7 @@ export function createProgram(): Command {
     .option("--json", "Print JSON", false)
     .action((options: { project: string; dataset?: string; limit?: string; json?: boolean }) => {
       const spec = buildDatasetCanvasSpec({ projectId: options.project, dataset: options.dataset, limit: parseLimit(options.limit, 10) });
-      printMaybeJson(spec, options.json ?? true);
+      printJson(spec);
     });
 
   program

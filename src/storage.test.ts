@@ -51,7 +51,7 @@ describe("open-datasets storage", () => {
       name: "Bank shortlist",
       projectId: "swiss-bank-account",
       sourceId: source.id,
-      classification: "private",
+      classification: "public",
       rows: [
         { Bank: "Mirabaud", Jurisdiction: "CH", Minimum: 1_000_000, Status: "research" },
         { Bank: "UBS", Jurisdiction: "CH", Minimum: 1_000_000, Status: "research" },
@@ -69,6 +69,34 @@ describe("open-datasets storage", () => {
     expect(preview.rows).toEqual([{ bank: "Mirabaud", jurisdiction: "CH", minimum: 1_000_000, status: "research" }]);
     expect(preview.truncated).toBe(true);
     expect(Object.keys(dataset.schema.properties ?? {})).toEqual(["bank", "jurisdiction", "minimum", "status"]);
+  });
+
+  test("redacts private dataset previews by default", () => {
+    ingestDataset({
+      name: "Private Documents",
+      projectId: "swiss-bank-account",
+      classification: "private",
+      rows: [{ id: "doc-1", tax_id: "secret-tax-id", status: "needs review" }],
+    });
+
+    const redacted = previewDataset("private-documents", { limit: 1 }, "swiss-bank-account");
+    const unredacted = previewDataset("private-documents", { limit: 1, redact: false }, "swiss-bank-account");
+
+    expect(redacted.rows[0]).toMatchObject({ id: "[redacted]", tax_id: "[redacted]", status: "[redacted]" });
+    expect(unredacted.rows[0]).toMatchObject({ id: "doc-1", tax_id: "secret-tax-id", status: "needs review" });
+  });
+
+  test("rolls back failed ingests instead of leaving partial dataset records", () => {
+    expect(() => ingestDataset({
+      name: "Duplicate Keys",
+      projectId: "swiss-bank-account",
+      rows: [
+        { id: "same", bank: "Mirabaud" },
+        { id: "same", bank: "UBS" },
+      ],
+    })).toThrow();
+
+    expect(storageStatus()).toMatchObject({ datasets: 0, records: 0 });
   });
 
   test("keeps duplicate dataset slugs unique per project", () => {

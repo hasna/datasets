@@ -5,6 +5,7 @@ export interface DatasetRenderInput {
   dataset: string;
   projectId?: string | null;
   limit?: number;
+  redact?: boolean;
 }
 
 export interface DatasetCanvasInput {
@@ -20,7 +21,7 @@ export interface DatasetJsonRenderSpec extends JsonObject {
 }
 
 export function buildDatasetRenderSpec(input: DatasetRenderInput): DatasetJsonRenderSpec {
-  const preview = previewDataset(input.dataset, { limit: input.limit ?? 20 }, input.projectId ?? null);
+  const preview = previewDataset(input.dataset, { limit: input.limit ?? 20, redact: input.redact ?? true }, input.projectId ?? null);
   return {
     root: "root",
     elements: {
@@ -125,7 +126,7 @@ function datasetNodes(dataset: Dataset, index: number, limit: number): JsonObjec
         status: preview.truncated ? "truncated" : "ready",
         items: preview.rows.slice(0, 5).map((row, rowIndex) => ({
           id: `${dataset.id}-sample-${rowIndex}`,
-          title: Object.entries(row).slice(0, 3).map(([key, value]) => `${key}: ${String(value)}`).join(" · "),
+          title: `Row ${rowIndex + 1} · ${Object.keys(row).slice(0, 6).join(", ") || "No preview columns"}`,
         })),
       },
     },

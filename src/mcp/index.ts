@@ -34,7 +34,7 @@ const require = createRequire(import.meta.url);
 const pkg = require("../../package.json") as { version: string };
 
 type ToolHandler = (params: any) => unknown | Promise<unknown>;
-type McpCapability = "mutations" | "imports";
+type McpCapability = "mutations" | "imports" | "sensitive_reads";
 
 const MCP_TOOL_CAPABILITIES: Record<string, McpCapability[]> = {
   datasets_sources_add: ["mutations"],
@@ -91,8 +91,11 @@ export function buildServer(): McpServer {
     project: z.string().optional().describe("Optional project slug"),
     limit: z.number().int().positive().max(500).optional().default(20),
     columns: z.array(z.string()).optional().describe("Optional selected columns"),
-  }, async ({ dataset, project, limit, columns }) => {
-    return previewDataset(dataset, { limit, columns }, project ? slugify(project) : undefined);
+    redact: z.boolean().optional().default(true),
+  }, async ({ dataset, project, limit, columns, redact }) => {
+    const projectId = project ? slugify(project) : undefined;
+    if (redact === false) requireSensitiveRead(dataset, projectId);
+    return previewDataset(dataset, { limit, columns, redact }, projectId);
   });
 
   registerTool(server, "datasets_ingest", "Ingest rows from a registered source or local CSV/JSON/JSONL path", {
@@ -117,14 +120,13 @@ export function buildServer(): McpServer {
   });
 
   registerTool(server, "datasets_schema_infer", "Infer a JSON schema from a dataset, source, or file path", {
-    ref: z.string().describe("Dataset id/slug, source id/slug, or local file path"),
+    ref: z.string().describe("Dataset id/slug or registered source id/slug"),
   }, async ({ ref }) => {
     const dataset = getDataset(ref);
     if (dataset) return dataset.schema;
     const source = getSource(ref);
-    const path = source?.path ?? (statExists(resolve(ref)) ? resolve(ref) : null);
-    if (!path) throw new Error(`Source or dataset not found: ${ref}`);
-    return inferJsonSchema(readRows(path, source?.kind ?? detectKind(path)));
+    if (!source?.path) throw new Error(`Registered source or dataset not found: ${ref}`);
+    return inferJsonSchema(readRows(source.path, source.kind));
   });
 
   registerTool(server, "datasets_projections_create", "Create a saved dataset projection", {
@@ -151,7 +153,12 @@ export function buildServer(): McpServer {
     dataset: z.string().describe("Dataset id or slug"),
     project: z.string().optional().describe("Optional project slug"),
     limit: z.number().int().positive().max(500).optional().default(20),
-  }, async ({ dataset, project, limit }) => buildDatasetRenderSpec({ dataset, projectId: project ? slugify(project) : null, limit }));
+    redact: z.boolean().optional().default(true),
+  }, async ({ dataset, project, limit, redact }) => {
+    const projectId = project ? slugify(project) : null;
+    if (redact === false) requireSensitiveRead(dataset, projectId);
+    return buildDatasetRenderSpec({ dataset, projectId, limit, redact });
+  });
 
   registerTool(server, "datasets_render_canvas", "Build a React Flow canvas spec for project datasets", {
     project: z.string().describe("Project slug"),
@@ -201,6 +208,14 @@ function requireMcpToolCapabilities(toolName: string) {
     }],
     isError: true,
   };
+}
+
+function requireSensitiveRead(datasetRef: string, projectId?: string | null): void {
+  const dataset = getDataset(datasetRef, projectId);
+  if (!dataset) return;
+  if ((dataset.classification === "private" || dataset.classification === "sensitive") && !mcpCapabilityEnabled("sensitive_reads")) {
+    throw new Error("Unredacted private/sensitive dataset reads require OPEN_DATASETS_MCP_ALLOW_SENSITIVE_READS=1.");
+  }
 }
 
 function mcpCapabilityEnabled(capability: McpCapability): boolean {
