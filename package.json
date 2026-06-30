@@ -1,6 +1,6 @@
 {
   "name": "@hasna/datasets",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Local dataset registry, previews, render adapters, and project dashboard provider for Hasna agents.",
   "type": "module",
   "license": "Apache-2.0",
@@ -44,7 +44,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "rm -rf dist && bun build src/cli/index.ts --outdir dist/cli --target bun && bun build src/mcp/index.ts --outdir dist/mcp --target bun --external @modelcontextprotocol/sdk && bun build src/index.ts src/storage.ts src/schemas.ts src/render.ts src/project-panel.ts --outdir dist --target bun && tsc -p tsconfig.build.json --emitDeclarationOnly --outDir dist",

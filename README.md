@@ -16,6 +16,13 @@ The first release is intentionally local-first:
 Datasets emit `kind: "custom"` in project panels until `open-contracts` adds a
 first-class `datasets` integration kind.
 
+## Install
+
+```bash
+bun install -g @hasna/datasets
+datasets --help
+```
+
 ## CLI
 
 ```bash
