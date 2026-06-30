@@ -159,7 +159,7 @@ function sanitizeCsvCell(value: string): string {
 
 export function createProgram(): Command {
   const program = new Command();
-  program.name("datasets").description("Local datasets for Hasna project dashboards").version("0.1.3");
+  program.name("datasets").description("Local datasets for Hasna project dashboards").version("0.1.5");
 
   program
     .command("init")
